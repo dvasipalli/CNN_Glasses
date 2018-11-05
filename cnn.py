@@ -1,0 +1,113 @@
+
+import tensorflow as tf
+import numpy as np
+import random as rand
+import os
+import sys
+from glasses import getData
+from sklearn.model_selection import train_test_split
+
+STEPS = 50000
+BATCH = 20
+LR = 0.00001
+NC = 2
+NODES = 50
+
+
+class cnnModel:
+    def __init__(self, images, labels, train_size=0.75, lr=0.00001, nodes=50, oclasses=2):
+        self.N = len(images)
+        self.r = len(images[0])
+        self.c = len(images[0][0])
+        images = np.reshape(images, (self.N, self.r*self.c))
+
+        self.x_train, self.x_test, self.y_train, self.y_test = train_test_split(images, labels,\
+                test_size=1-train_size)
+        self.N_train = len(self.x_train)
+        self.size_train = self.r*self.c
+        print(self.x_train.shape, self.r, self.c)
+
+        self.x = tf.placeholder(tf.float32, [None, self.size_train])
+        self.y = tf.placeholder(tf.float32, [None, oclasses])
+        self.x_image = tf.reshape(self.x, [-1, self.r, self.c, 1])
+
+        self.conv1 = self.conv_layer(self.x_image, shape=[7, 7, 1, 32])
+        #(?, 112, 92, 32)
+        self.conv1_pool = self.max_pool_2x2(self.conv1)
+        #(?, 56, 46, 32)
+
+        self.conv2 = self.conv_layer(self.conv1_pool, shape=[7, 7, 32, 64])
+        #(?, 56, 46, 64)
+        self.conv2_pool = self.max_pool_2x2(self.conv2)
+        #(?, 28, 23, 64)
+        
+        self.conv3 = self.conv_layer(self.conv2_pool, shape=[7, 7, 64, 128])
+        # (?, 28, 23, 128)
+        self.conv3_pool = self.max_pool_2x2(self.conv3)
+        # (?, 14, 12, 128)
+        
+        self.conv4 = self.conv_layer(self.conv3_pool, shape=[7, 7, 128, 256])
+        # (?, 14, 12, 128)
+        self.conv4_pool = self.max_pool_2x2(self.conv4)
+        # (?, 7, 6, 256)
+        
+        self.conv_flat = tf.reshape(self.conv4_pool, [-1, 7*6*256])
+        self.full1 = tf.nn.relu(self.full_layer(self.conv_flat, nodes))
+        
+        self.keep_prob = tf.placeholder(tf.float32)
+        self.full1_drop = tf.nn.dropout(self.full1, keep_prob=self.keep_prob)
+        
+        self.y_conv = self.full_layer(self.full1_drop, oclasses)
+        
+        self.cross_entropy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.y_conv, labels=self.y))
+        self.train_step = tf.train.AdamOptimizer(lr).minimize(self.cross_entropy)
+        self.correct_pred = tf.equal(tf.argmax(self.y_conv, 1), tf.argmax(self.y, 1))
+        self.accuracy = tf.reduce_mean(tf.cast(self.correct_pred, tf.float32))
+        self.sess = tf.Session()
+        
+    def weight_variable(self, shape):
+        initial = tf.truncated_normal(shape, stddev=0.1)
+        return tf.Variable(initial)
+    def bias_variable(self, shape):
+        initial = tf.constant(0.1, shape=shape)
+        return tf.Variable(initial)
+    def conv2d(self, x, W):
+        return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
+    def max_pool_2x2(self, x):
+        return tf.nn.max_pool(x, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
+    def conv_layer(self, input, shape):
+        W = self.weight_variable(shape)
+        b = self.bias_variable([shape[3]])
+        return tf.nn.relu(self.conv2d(input, W) + b)
+    def full_layer(self, input, size):
+        in_size = int(input.get_shape()[1])
+        W = self.weight_variable([in_size, size])
+        b = self.bias_variable([size])
+        return tf.matmul(input, W) + b
+    def get_batch(self, x_train, y_train, N, batch):
+        l = rand.randint(0, N-batch)
+        r = l + batch
+        return x_train[l:r], y_train[l:r]
+
+    def train(self, steps=1000, batch=20):
+        self.sess.run(tf.global_variables_initializer())
+        print(self.x_test.shape) 
+        for i in range(steps):
+            if i%100 == 0:
+                ans = self.sess.run(self.accuracy, feed_dict={self.x:self.x_test, self.y:self.y_test, self.keep_prob:1})
+                print('Steps: {0:6d}, Accuracy:{1:.2f}'.format(i, ans*100))
+
+            x_batch, y_batch = self.get_batch(self.x_train, self.y_train, self.N_train, batch)
+            self.sess.run(self.train_step, feed_dict={self.x: x_batch, self.y: y_batch, self.keep_prob:0.7})
+        ans = self.sess.run(self.accuracy, feed_dict={self.x: self.x_test, self.y:self.y_test, self.keep_prob:1})
+        print(ans*100)
+
+
+if __name__ == "__main__":
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+    tf.logging.set_verbosity(tf.logging.ERROR)
+    
+    images, labels = getData(data='original')
+    
+    model = cnnModel(images, labels, lr=LR, oclasses=NC)
+    model.train(steps=STEPS, batch=BATCH)
