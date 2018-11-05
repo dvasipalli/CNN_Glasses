@@ -45,10 +45,10 @@ def getData(data='conv'):
         l[lb[i]] = 1
         labels.append(l)
     
-    images = np.array(images).reshape((N,r,c))
+    images = np.array(images).reshape((N,r*c))
     labels = np.array(labels).reshape((N,NC))
 
-    return images, labels
+    return images, labels, r, c
 
 if __name__ == '__main__':
 
